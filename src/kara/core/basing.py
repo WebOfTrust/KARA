@@ -5,9 +5,11 @@ kara.core.basing module
 
 Database support
 """
-from keri.core import coring
+from keri import help
+from keri.core import coring, serdering
 from keri.db import dbing, subing
-from keri.vc import proving
+
+logger = help.ogler.getLogger()
 
 
 class CueBaser(dbing.LMDBer):
@@ -58,11 +60,41 @@ class CueBaser(dbing.LMDBer):
         self.rev = subing.CesrSuber(db=self, subkey='rev.', klas=coring.Dater)
 
         # presentations with resolved credentials that need to be sent to the hook
-        self.recv = proving.CrederSuber(db=self, subkey='recv')
+        self.recv = subing.SerderSuber(db=self, subkey="recv", klas=serdering.SerderACDC)
         # revocations whose TEL rev event has been resolved that need to be sent to the hook
-        self.revk = proving.CrederSuber(db=self, subkey='revk')
+        self.revk = subing.SerderSuber(db=self, subkey="revk", klas=serdering.SerderACDC)
 
         # presentations that have been sent to the hook that need to be ack'ed
-        self.ack = proving.CrederSuber(db=self, subkey='ack')
+        self.ack = subing.SerderSuber(db=self, subkey="ack", klas=serdering.SerderACDC)
 
         return self.env
+
+    def clearEscrows(self):
+        """
+        Clear all credential escrows. Useful in testing to avoid many unneeded log messages or force reprocessing of presentations.
+        """
+        self.iss.trim()
+        self.rev.trim()
+        self.recv.trim()
+        self.revk.trim()
+        logger.info("Cleared iss and rev escrows")
+
+    def getCounts(self):
+        """
+        Get counts of each database for metrics monitoring
+        """
+        snd  = len([said for (said,), prefixer in self.snd.getItemIter()])
+        iss  = len([said for (said,), dater in self.iss.getItemIter()])
+        rev  = len([said for (said,), dater in self.rev.getItemIter()])
+
+        recv = len([said for (said, dater_qb64), creder in self.recv.getItemIter()])
+        revk = len([said for (said, dater_qb64), creder in self.revk.getItemIter()])
+        ack  = len([said for (said,), creder in self.ack.getItemIter()])
+        return {
+            'senders': snd,
+            'iss': iss,
+            'rev': rev,
+            'recv': recv,
+            'revk': revk,
+            'ack': ack
+        }

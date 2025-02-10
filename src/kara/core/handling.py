@@ -99,16 +99,14 @@ class PresentationProofHandler(doing.Doer):
 
 class Communicator(doing.DoDoer):
     """
-    Communicator is responsible for comminucating the receipt and successful verification
+    Communicator is responsible for communicating the receipt and successful verification
     of credential presentation and revocation messages from external third parties via
     web hook API calls.
-
-
     """
 
     TimeoutComms = 600
 
-    def __init__(self, hby, hab, cdb, reger, hook):
+    def __init__(self, hby, hab, cdb, reger, hook, timeout=10, retry=3.0):
         """
 
         Create a communicator capable of persistent processing of messages and performing
@@ -120,6 +118,8 @@ class Communicator(doing.DoDoer):
             cdb (CueBaser): communication escrow database environment
             reger (Reger): credential registry and database
             hook (str): web hook to call in response to presentations and revocations
+            timeout (int): escrow timeout (in minutes) for events not delivered to upstream web hook
+            retry (float): retry delay (in seconds) for failed web hook attempts
 
         """
         self.hby = hby
@@ -127,9 +127,52 @@ class Communicator(doing.DoDoer):
         self.cdb = cdb
         self.reger = reger
         self.hook = hook
+        self.timeout = timeout
+        self.retry = retry
         self.clients = dict()
 
         super(Communicator, self).__init__(doers=[doing.doify(self.escrowDo)])
+
+    def escrowDo(self, tymth, tock=1.0):
+        """ Process escrows of comms pipeline
+
+        Steps involve:
+           1. Sending local event with sig to other participants
+           2. Waiting for signature threshold to be met.
+           3. If elected and delegated identifier, send complete event to delegator
+           4. If delegated, wait for delegator's anchor
+           5. If elected, send event to witnesses and collect receipts.
+           6. Otherwise, wait for fully receipted event
+
+        Parameters:
+            tymth (function): injected function wrapper closure returned by .tymen() of
+                Tymist instance. Calling tymth() returns associated Tymist .tyme.
+            tock (float): injected initial tock value.  Default to 1.0 to slow down processing
+
+        """
+        # enter context
+        self.wind(tymth)
+        self.tock = tock
+        _ = (yield self.tock)
+
+        while True:
+            try:
+                self.processEscrows()
+            except Exception as e:
+                print(e)
+
+            yield 0.5
+
+    def processEscrows(self):
+        """
+        Process communication pipelines
+
+        """
+        self.processPresentations()
+        self.processRevocations()
+        self.processReceived(db=self.cdb.recv, action="iss")
+        self.processReceived(db=self.cdb.revk, action="rev")
+        self.processAcks()
 
     def processPresentations(self):
 
@@ -203,47 +246,6 @@ class Communicator(doing.DoDoer):
             # TODO: generate EXN ack message with credential information
             print(f"ACK for credential {said} will be sent to {creder.issuer}")
             self.cdb.ack.rem(keys=(said,))
-
-    def escrowDo(self, tymth, tock=1.0):
-        """ Process escrows of comms pipeline
-
-        Steps involve:
-           1. Sending local event with sig to other participants
-           2. Waiting for signature threshold to be met.
-           3. If elected and delegated identifier, send complete event to delegator
-           4. If delegated, wait for delegator's anchor
-           5. If elected, send event to witnesses and collect receipts.
-           6. Otherwise, wait for fully receipted event
-
-        Parameters:
-            tymth (function): injected function wrapper closure returned by .tymen() of
-                Tymist instance. Calling tymth() returns associated Tymist .tyme.
-            tock (float): injected initial tock value.  Default to 1.0 to slow down processing
-
-        """
-        # enter context
-        self.wind(tymth)
-        self.tock = tock
-        _ = (yield self.tock)
-
-        while True:
-            try:
-                self.processEscrows()
-            except Exception as e:
-                print(e)
-
-            yield 0.5
-
-    def processEscrows(self):
-        """
-        Process communication pipelines
-
-        """
-        self.processPresentations()
-        self.processRevocations()
-        self.processReceived(db=self.cdb.recv, action="iss")
-        self.processReceived(db=self.cdb.revk, action="rev")
-        self.processAcks()
 
     def request(self, said, resource, action, actor, data):
         """ Generate and launch request to remote hook

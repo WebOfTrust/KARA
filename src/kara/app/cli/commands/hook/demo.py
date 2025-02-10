@@ -4,15 +4,19 @@ kara.cli.commands module
 
 """
 import argparse
+import logging
 
 import falcon
 from hio.base import doing
 from hio.core import http
+from keri import help
 from keri.app import keeping, habbing, directing, configing
 from keri.app.cli.common import existing
 from keri.end import ending
 
 from kara.core import serving
+
+logger = help.ogler.getLogger()
 
 parser = argparse.ArgumentParser(description='Launch KARA sample web hook server')
 parser.set_defaults(handler=lambda args: launch(args),
@@ -24,6 +28,12 @@ parser.add_argument('-p', '--http',
 
 
 def launch(args, expire=0.0):
+    baseFormatter = logging.Formatter('%(asctime)s [hook] %(levelname)-8s %(message)s')
+    baseFormatter.default_msec_format = None
+    help.ogler.baseConsoleHandler.setFormatter(baseFormatter)
+    help.ogler.level = logging.getLevelName(logging.INFO)
+    help.ogler.reopen(name="hook", temp=True, clear=True)
+
     httpPort = args.http
 
     app = falcon.App(
@@ -31,7 +41,7 @@ def launch(args, expire=0.0):
             allow_origins='*',
             allow_credentials='*',
             expose_headers=['cesr-attachment', 'cesr-date', 'content-type']))
-    app.add_route("/", Listener())
+    app.add_route("/", WebhookListener())
 
     server = http.Server(port=httpPort, app=app)
     httpServerDoer = http.ServerDoer(server=server)
@@ -40,9 +50,9 @@ def launch(args, expire=0.0):
     directing.runController(doers=[httpServerDoer], expire=expire)
 
 
-class Listener:
+class WebhookListener:
     """
-    Endpoint for web hook calls that prints events to stdout
+    Demonstration endpoint for web hook calls that prints events to stdout and stores a simple presentation cache.
     """
 
     def on_post(self, req, rep):
